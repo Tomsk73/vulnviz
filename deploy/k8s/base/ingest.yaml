@@ -1,0 +1,149 @@
+# One-off bootstrap Job (full load) plus scheduled refreshes.
+# The bootstrap downloads roughly 3 GB of feeds; the scratch volume holds the
+# archives while they are read. Expect 10-30 minutes depending on bandwidth.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: vulnviz-ingest-scratch
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: { requests: { storage: 10Gi } }
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: vulnviz-ingest-bootstrap
+  labels: { app.kubernetes.io/name: vulnviz, app.kubernetes.io/component: ingest }
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: vulnviz, app.kubernetes.io/component: ingest }
+    spec:
+      restartPolicy: OnFailure
+      securityContext:
+        runAsNonRoot: true
+        fsGroup: 65532
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: ingest
+          image: vulnviz-ingest
+          args: [all]
+          env:
+            - name: DATABASE_URL
+              valueFrom: { secretKeyRef: { name: vulnviz-db, key: DATABASE_URL } }
+            - { name: VULNVIZ_CONFIG, value: /etc/vulnviz/sources.yaml }
+            - { name: VULNVIZ_TEMP, value: /scratch }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          volumeMounts:
+            - { name: sources, mountPath: /etc/vulnviz, readOnly: true }
+            - { name: scratch, mountPath: /scratch }
+          resources:
+            requests: { cpu: "1", memory: 1Gi }
+            limits: { memory: 3Gi }
+      volumes:
+        - name: sources
+          configMap: { name: vulnviz-sources }
+        - name: scratch
+          persistentVolumeClaim: { claimName: vulnviz-ingest-scratch }
+---
+# Daily: reload the CVE list (the CVE Program ships a full archive nightly) and
+# re-pull every distro bundle, then rebuild the derived tables.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: vulnviz-ingest-daily
+  labels: { app.kubernetes.io/name: vulnviz, app.kubernetes.io/component: ingest }
+spec:
+  schedule: "30 3 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        metadata:
+          labels: { app.kubernetes.io/name: vulnviz, app.kubernetes.io/component: ingest }
+        spec:
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            fsGroup: 65532
+            seccompProfile: { type: RuntimeDefault }
+          containers:
+            - name: ingest
+              image: vulnviz-ingest
+              args: [all]
+              env:
+                - name: DATABASE_URL
+                  valueFrom: { secretKeyRef: { name: vulnviz-db, key: DATABASE_URL } }
+                - { name: VULNVIZ_CONFIG, value: /etc/vulnviz/sources.yaml }
+                - { name: VULNVIZ_TEMP, value: /scratch }
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: [ALL] }
+              volumeMounts:
+                - { name: sources, mountPath: /etc/vulnviz, readOnly: true }
+                - { name: scratch, mountPath: /scratch }
+              resources:
+                requests: { cpu: "1", memory: 1Gi }
+                limits: { memory: 3Gi }
+          volumes:
+            - name: sources
+              configMap: { name: vulnviz-sources }
+            - name: scratch
+              persistentVolumeClaim: { claimName: vulnviz-ingest-scratch }
+---
+# Every 6 hours: incremental sync for distros that publish an index feed
+# (Chainguard, Echo), fetching only advisories whose modified time moved.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: vulnviz-ingest-sync
+  labels: { app.kubernetes.io/name: vulnviz, app.kubernetes.io/component: ingest }
+spec:
+  schedule: "15 */6 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        metadata:
+          labels: { app.kubernetes.io/name: vulnviz, app.kubernetes.io/component: ingest }
+        spec:
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            seccompProfile: { type: RuntimeDefault }
+          containers:
+            - name: ingest
+              image: vulnviz-ingest
+              args: [sync, chainguard, echo]
+              env:
+                - name: DATABASE_URL
+                  valueFrom: { secretKeyRef: { name: vulnviz-db, key: DATABASE_URL } }
+                - { name: VULNVIZ_CONFIG, value: /etc/vulnviz/sources.yaml }
+                - { name: VULNVIZ_TEMP, value: /tmp }
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: [ALL] }
+              volumeMounts:
+                - { name: sources, mountPath: /etc/vulnviz, readOnly: true }
+                - { name: tmp, mountPath: /tmp }
+              resources:
+                requests: { cpu: 500m, memory: 512Mi }
+                limits: { memory: 2Gi }
+          volumes:
+            - name: sources
+              configMap: { name: vulnviz-sources }
+            - name: tmp
+              emptyDir: {}

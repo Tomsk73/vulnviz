@@ -1,0 +1,22 @@
+# Starting point for a real cluster: pin image tags, provide the database
+# secret from your secret store, and set the ingress host/TLS.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+images:
+  - name: vulnviz-api
+    newName: REGISTRY/vulnviz-api
+    newTag: v0.1.0
+  - name: vulnviz-web
+    newName: REGISTRY/vulnviz-web
+    newTag: v0.1.0
+  - name: vulnviz-ingest
+    newName: REGISTRY/vulnviz-ingest
+    newTag: v0.1.0
+patches:
+  - target: { kind: Ingress, name: vulnviz }
+    patch: |
+      - op: replace
+        path: /spec/rules/0/host
+        value: vulnviz.example.com

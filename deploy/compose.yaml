@@ -1,0 +1,36 @@
+# Local end-to-end stack: docker compose -f deploy/compose.yaml up --build
+# Then: docker compose -f deploy/compose.yaml run --rm ingest all
+services:
+  db:
+    image: cgr.dev/chainguard/postgres:latest
+    environment:
+      POSTGRES_USER: vulnviz
+      POSTGRES_PASSWORD: vulnviz
+      POSTGRES_DB: vulnviz
+    command: ["-c", "shared_buffers=1GB", "-c", "work_mem=128MB", "-c", "maintenance_work_mem=512MB", "-c", "max_wal_size=4GB"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "vulnviz"]
+      interval: 5s
+      retries: 20
+  api:
+    build: { context: .., dockerfile: build/Dockerfile.api }
+    environment:
+      DATABASE_URL: postgres://vulnviz:vulnviz@db:5432/vulnviz?sslmode=disable
+    depends_on: { db: { condition: service_healthy } }
+    ports: ["8080:8080"]
+    networks: { default: { aliases: [vulnviz-api] } }
+  web:
+    build: { context: .., dockerfile: build/Dockerfile.web }
+    depends_on: [api]
+    ports: ["8000:8080"]
+  ingest:
+    build: { context: .., dockerfile: build/Dockerfile.ingest }
+    environment:
+      DATABASE_URL: postgres://vulnviz:vulnviz@db:5432/vulnviz?sslmode=disable
+    volumes: [scratch:/scratch]
+    depends_on: { db: { condition: service_healthy } }
+    profiles: [jobs]
+volumes:
+  pgdata: {}
+  scratch: {}

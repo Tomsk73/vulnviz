@@ -1,0 +1,34 @@
+# Local kind cluster: images loaded with `kind load docker-image`, smaller
+# resource requests, NodePort access instead of an ingress controller.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+patches:
+  - path: resources.yaml
+  - target: { kind: Service, name: vulnviz-web }
+    patch: |
+      - op: replace
+        path: /spec/type
+        value: NodePort
+      - op: add
+        path: /spec/ports/0/nodePort
+        value: 30080
+  - target: { kind: Deployment, name: vulnviz-api }
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 1
+  - target: { kind: Deployment, name: vulnviz-web }
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 1
+  - target: { kind: StatefulSet, name: vulnviz-db }
+    patch: |
+      - op: replace
+        path: /spec/volumeClaimTemplates/0/spec/resources/requests/storage
+        value: 10Gi
+      - op: replace
+        path: /spec/template/spec/containers/0/args
+        value: ["-c", "shared_buffers=256MB", "-c", "work_mem=64MB", "-c", "maintenance_work_mem=256MB", "-c", "max_wal_size=2GB"]

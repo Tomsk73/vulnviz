@@ -1,0 +1,108 @@
+# Data sources for vulnviz.
+#
+# Every distro has a "bulk" source used for full loads (a zip of OSV JSON
+# documents) and optionally an "incremental" source (an index of {id, modified}
+# pairs with one document per advisory) used by the scheduled refresh job.
+#
+# The "rules" block tells the aggregator how to interpret a distro's records.
+# See README.md ("How fix times are derived") for the reasoning behind each.
+
+cve:
+  releases_api: https://api.github.com/repos/CVEProject/cvelistV5/releases
+  # bulk_url: /data/cves_all.zip.zip   # optional local override for offline loads
+
+distros:
+  - id: chainguard
+    name: Chainguard
+    homepage: https://advisories.cgr.dev/
+    notes: >-
+      Advisory published time is when Chainguard opened the advisory; the fix
+      timestamp comes from the per-component "fixed" event, which is exact.
+      Wolfi duplicates of each advisory are dropped (ecosystem prefix filter).
+    bulk:
+      type: osv_zip
+      url: https://osv-vulnerabilities.storage.googleapis.com/Chainguard/all.zip
+    incremental:
+      type: osv_index
+      url: https://advisories.cgr.dev/chainguard/v3/osv/all.json
+      record_url: https://advisories.cgr.dev/chainguard/v3/osv/{id}.json
+    rules:
+      fix_time_basis: component_event
+      ecosystem_prefix: Chainguard
+
+  - id: echo
+    name: Echo
+    homepage: https://advisory.echohq.com/
+    notes: >-
+      Echo publishes one OSV record per CVE and package. Its published time
+      falls within a day of the CVE's own publication for over 90% of records,
+      so it marks when Echo began tracking the CVE rather than when a fix
+      shipped. Echo therefore contributes fix coverage and backlog but is
+      excluded from time-to-remediate statistics.
+    bulk:
+      type: osv_zip
+      url: https://osv-vulnerabilities.storage.googleapis.com/Echo/all.zip
+    incremental:
+      type: osv_index
+      url: https://advisory.echohq.com/osv/all.json
+      record_url: https://advisory.echohq.com/osv/{id}.json
+    rules:
+      fix_time_basis: published
+      trusted_kinds: [__none__]
+
+  - id: redhat
+    name: Red Hat
+    homepage: https://security.access.redhat.com/data/osv/
+    notes: >-
+      RHSA/RHBA/RHEA errata. Errata up to 2023 were backfilled into the OSV
+      feed in September 2024 with that generation date as "published", so a
+      record whose published year differs from the year in its ID is kept but
+      excluded from time-to-remediate statistics.
+    bulk:
+      type: osv_zip
+      url: https://osv-vulnerabilities.storage.googleapis.com/Red%20Hat/all.zip
+    rules:
+      fix_time_basis: published
+      max_id_year_gap: 0
+
+  - id: ubuntu
+    name: Ubuntu
+    homepage: https://ubuntu.com/security/notices
+    notes: >-
+      USN and LSN notices carry real publication dates. UBUNTU-CVE tracker
+      records use the CVE's own publication date, so they count towards fix
+      coverage and backlog but not towards time-to-remediate.
+    bulk:
+      type: osv_zip
+      url: https://osv-vulnerabilities.storage.googleapis.com/Ubuntu/all.zip
+    rules:
+      fix_time_basis: published
+      trusted_kinds: [USN, LSN]
+
+  - id: debian
+    name: Debian
+    homepage: https://security-tracker.debian.org/
+    notes: >-
+      DSA, DLA and DTSA advisories carry real publication dates. DEBIAN-CVE
+      tracker records use the CVE's own publication date, so they count towards
+      fix coverage and backlog but not towards time-to-remediate.
+    bulk:
+      type: osv_zip
+      url: https://osv-vulnerabilities.storage.googleapis.com/Debian/all.zip
+    rules:
+      fix_time_basis: published
+      trusted_kinds: [DSA, DLA, DTSA]
+
+  - id: alpine
+    name: Alpine
+    homepage: https://secdb.alpinelinux.org/
+    notes: >-
+      Alpine's secdb has no advisory dates; OSV records use the CVE publication
+      date, so Alpine contributes fix coverage and backlog only.
+    enabled: false
+    bulk:
+      type: osv_zip
+      url: https://osv-vulnerabilities.storage.googleapis.com/Alpine/all.zip
+    rules:
+      fix_time_basis: published
+      trusted_kinds: [__none__]

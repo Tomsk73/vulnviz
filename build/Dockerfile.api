@@ -1,0 +1,23 @@
+# syntax=docker/dockerfile:1
+# API service: static Go binary on a distroless Chainguard base.
+ARG GO_IMAGE=cgr.dev/chainguard/go:latest-dev
+ARG RUNTIME_IMAGE=cgr.dev/chainguard/static:latest
+
+FROM ${GO_IMAGE} AS build
+WORKDIR /src
+# GOPROXY is passed through from the build environment so CI can point at
+# Chainguard Libraries (or any proxy) without editing this file.
+ARG GOPROXY
+ARG GONOSUMDB
+ARG GOFLAGS
+COPY go.mod go.sum ./
+RUN go mod download
+COPY cmd ./cmd
+COPY internal ./internal
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/api ./cmd/api
+
+FROM ${RUNTIME_IMAGE}
+COPY --from=build /out/api /usr/bin/api
+USER 65532:65532
+EXPOSE 8080
+ENTRYPOINT ["/usr/bin/api"]

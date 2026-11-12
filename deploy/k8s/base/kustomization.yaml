@@ -1,0 +1,31 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: vulnviz
+resources:
+  - namespace.yaml
+  - postgres.yaml
+  - api.yaml
+  - web.yaml
+  - ingest.yaml
+configMapGenerator:
+  - name: vulnviz-sources
+    files:
+      - sources.yaml
+secretGenerator:
+  - name: vulnviz-db
+    literals:
+      # Replace in an overlay (or use an external secret operator) for anything beyond a demo.
+      - POSTGRES_USER=vulnviz
+      - POSTGRES_PASSWORD=change-me
+      - POSTGRES_DB=vulnviz
+      - DATABASE_URL=postgres://vulnviz:change-me@vulnviz-db:5432/vulnviz?sslmode=disable
+images:
+  - name: vulnviz-api
+    newName: vulnviz-api
+    newTag: dev
+  - name: vulnviz-web
+    newName: vulnviz-web
+    newTag: dev
+  - name: vulnviz-ingest
+    newName: vulnviz-ingest
+    newTag: dev

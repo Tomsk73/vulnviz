@@ -1,4 +1,6 @@
-# Starting point for a real cluster: pin image tags, provide the database
+# Starting point for a real cluster. Images come from GHCR, built by
+# .github/workflows/images.yaml; push a vX.Y.Z git tag to publish a matching
+# image tag, then set newTag below. Also provide the database
 # secret from your secret store, and set the ingress host/TLS.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
@@ -6,13 +8,13 @@ resources:
   - ../../base
 images:
   - name: vulnviz-api
-    newName: REGISTRY/vulnviz-api
+    newName: ghcr.io/andrewd-cg/vulnviz-api
     newTag: v0.1.0
   - name: vulnviz-web
-    newName: REGISTRY/vulnviz-web
+    newName: ghcr.io/andrewd-cg/vulnviz-web
     newTag: v0.1.0
   - name: vulnviz-ingest
-    newName: REGISTRY/vulnviz-ingest
+    newName: ghcr.io/andrewd-cg/vulnviz-ingest
     newTag: v0.1.0
 patches:
   - target: { kind: Ingress, name: vulnviz }

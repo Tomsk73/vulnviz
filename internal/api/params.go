@@ -95,12 +95,14 @@ func parseParams(r *http.Request) (params, error) {
 	return p, nil
 }
 
+// likeEscape makes user text literal inside a LIKE pattern.
+var likeEscape = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+
 // ecosystemClause returns a SQL predicate on column `col` and its argument.
 func ecosystemClause(col, eco string) (string, any) {
 	if strings.HasSuffix(eco, "*") {
 		prefix := strings.TrimSuffix(eco, "*")
-		esc := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(prefix)
-		return col + " LIKE %s", esc + "%"
+		return col + " LIKE %s", likeEscape.Replace(prefix) + "%"
 	}
 	return col + " = %s", eco
 }

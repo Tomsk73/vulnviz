@@ -1,7 +1,7 @@
 // Series colour follows the entity, never its position in the current filter.
 // Slots are the validated categorical order (see README, "Design notes").
 export const distroSlot: Record<string, number> = {
-  chainguard: 1, ubuntu: 2, debian: 3, redhat: 4, echo: 5, alpine: 6, wolfi: 7,
+  chainguard: 1, ubuntu: 2, debian: 3, redhat: 4, echo: 5, alpine: 6, wolfi: 7, dhi: 8,
 }
 let nextSlot = 8
 export function distroColor(id: string): string {

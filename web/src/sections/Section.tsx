@@ -7,7 +7,7 @@ export function Section({ id, title, lede, tools, table, children }: {
   return (
     <section className="section" aria-labelledby={`${id}-h`}>
       <div className="section-head">
-        <div><h2 id={`${id}-h`}>{title}</h2><p>{lede}</p></div>
+        <div><h2 id={`${id}-h`} tabIndex={-1}>{title}</h2><p>{lede}</p></div>
         <div className="tools">
           {tools}
           {table && <button type="button" className="btn" aria-pressed={showTable} onClick={() => setShowTable(s => !s)}>{showTable ? 'Show chart' : 'Show table'}</button>}

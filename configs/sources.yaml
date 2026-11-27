@@ -50,6 +50,24 @@ distros:
       fix_time_basis: published
       trusted_kinds: [__none__]
 
+  - id: dhi
+    name: Docker Hardened Images
+    homepage: https://github.com/docker-hardened-images/advisories
+    notes: >-
+      Docker began publishing this OSV feed on 9 November 2026. Published time
+      is when a record entered the feed, a median of about 90 days after the
+      CVE's publication for records that list a fix, and fixes carry no
+      timestamp of their own. Docker Hardened Images therefore contributes fix
+      coverage and backlog but is excluded from time-to-remediate statistics.
+      CVEs still under investigation are listed as affected, so they count as
+      open.
+    bulk:
+      type: osv_zip
+      url: https://osv-vulnerabilities.storage.googleapis.com/Docker%20Hardened%20Images/all.zip
+    rules:
+      fix_time_basis: published
+      trusted_kinds: [__none__]
+
   - id: redhat
     name: Red Hat
     homepage: https://security.access.redhat.com/data/osv/

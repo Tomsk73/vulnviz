@@ -27,12 +27,22 @@ multi-service Kubernetes app backed by PostgreSQL.
 | How long fixes take | Share of fixes landing within 1 day, 1 week, 30 days, 90 days, 1 year, longer | live |
 | Open CVEs right now | Unfixed CVEs per distribution by age and by severity | `fact_open` |
 | CVEs published per month | The upstream volume everyone is working against, by severity | `agg_cves_monthly` |
+| Browse CVEs | Which CVEs are behind a number: every CVE a distribution fixed or still lists, narrowed by days to fix or days open, severity, package or CVE ID. For example, the CVEs Debian took 90 days or more to fix, or the ones Ubuntu has had open for over a year | `fact_fixes_cve` / `fact_fixes_pkg`, `fact_open` |
 | CVE lookup | One CVE: when each distribution fixed it, where it is still open | `cves`, facts |
 | How each feed is read | The rule applied to each feed and the counts it produced | `distros`, `ingest_runs` |
 
 Filters (date range, distributions, severity, release/ecosystem, CVE scope,
 unit, month basis) live in the URL and scope every chart. Every chart has a
 table view and tooltips; dark mode follows the OS.
+
+Selecting a bar in "Fixes per month", "How long fixes take" or "Open CVEs
+right now" opens the browser on the CVEs that bar counted, and the list always
+totals to the bar. The browser's own state (status, distribution, severity,
+days range, search, sort, page) is kept in the URL as `b_*` parameters, so a
+list can be shared like any other view. It narrows the page-wide filters and
+follows the same rules as the charts: fixed CVEs are scoped by the date range,
+open CVEs are a snapshot the date range does not apply to, and only fixes with
+a real fix date have a duration to filter on.
 
 ## Data sources
 
@@ -41,6 +51,7 @@ table view and tooltips; dark mode follows the OS.
 | CVE records | [cve.org downloads](https://www.cve.org/Downloads) → `CVEProject/cvelistV5` GitHub release `*_all_CVEs_at_midnight.zip.zip` | CVE Record Format 5.x | ~660 MB, ~425k records |
 | Chainguard | OSV.dev bundle `Chainguard/all.zip` (bulk), [advisories.cgr.dev v3 index](https://advisories.cgr.dev/chainguard/v3/osv/all.json) plus per-ID documents (incremental) | OSV | 1.2 GB, ~1.37M advisories |
 | Echo | OSV.dev bundle `Echo/all.zip` (bulk), [advisory.echohq.com index](https://advisory.echohq.com/osv/all.json) (incremental) | OSV | 7 MB, ~13k |
+| Docker Hardened Images | OSV.dev bundle `Docker Hardened Images/all.zip` (mirrors `dhi/osv` in [docker-hardened-images/advisories](https://github.com/docker-hardened-images/advisories)) | OSV | 12 MB, ~4.5k |
 | Red Hat | OSV.dev bundle `Red Hat/all.zip` (mirrors security.access.redhat.com/data/osv) | OSV | 28 MB, ~24k errata |
 | Ubuntu | OSV.dev bundle `Ubuntu/all.zip` (mirrors canonical/ubuntu-security-notices OSV) | OSV | 815 MB, ~74k |
 | Debian | OSV.dev bundle `Debian/all.zip` (DSA/DLA/DTSA plus tracker records) | OSV | 82 MB, ~74k |
@@ -65,6 +76,7 @@ inspecting the data (November 2026):
 | Ubuntu | advisory `published` | USN, LSN | UBUNTU-CVE tracker records carry the CVE's own date. |
 | Debian | advisory `published` | DSA, DLA, DTSA | DEBIAN-CVE tracker records carry the CVE's own date. |
 | Echo | advisory `published` | none | For over 90% of records `published` is within a day of the CVE's publication, so it marks when tracking began, not the fix. |
+| Docker Hardened Images | advisory `published` | none | The feed began on 9 November 2026 and `published` is when a record entered it, a median of about 90 days after the CVE's publication for records that list a fix. Fixes carry no timestamp of their own. |
 | Alpine | advisory `published` | none | secdb has no dates; OSV records carry the CVE's date. |
 
 Untimed records still count towards "CVEs with a fix", release coverage, the
@@ -168,20 +180,40 @@ aggregate), `unit` (`cve`|`package`), `basis` (`fix_month`|`cve_month`),
 | `GET /api/v1/fixes/monthly` | `{distro, month, severity, fixes}` |
 | `GET /api/v1/mttr/monthly` | `{distro, month, severity, n, median, mean, p25, p75, p90}` |
 | `GET /api/v1/mttr/summary` | the same without month, for the whole range |
-| `GET /api/v1/mttr/distribution` | fix-time histogram buckets per distribution |
-| `GET /api/v1/backlog` | open CVEs per distribution × severity × age bucket |
+| `GET /api/v1/mttr/distribution` | fix-time histogram buckets per distribution, each with its `min_days`/`max_days` |
+| `GET /api/v1/backlog` | open CVEs per distribution × severity × age bucket, each with its `min_days`/`max_days` |
 | `GET /api/v1/cves/monthly` | CVEs published per month by severity |
+| `GET /api/v1/records` | one page of the CVEs behind the charts: `{rows, total, limit, offset}` |
 | `GET /api/v1/ecosystems?distro=` | releases/ecosystems with fix counts |
 | `GET /api/v1/cve/{id}` | CVE detail with per-distribution fixes and open packages |
 | `GET /api/v1/status` | dataset counts and recent ingest runs |
 | `GET /healthz`, `GET /readyz` | liveness, readiness |
+
+`/api/v1/records` takes the shared parameters plus:
+
+| Parameter | Meaning |
+|---|---|
+| `status` | `fixed` (default) or `open`. Open records ignore `from`/`to`, `basis` and `scope`, as the backlog does |
+| `min_days`, `max_days` | days from the CVE's publication to the fix, or to now when open; `min_days` is inclusive, `max_days` exclusive. For fixed records this keeps only fixes with a real fix date |
+| `undated` | `true` for CVEs with no publication date (the backlog's "no CVE date" bucket) |
+| `month` | one `YYYY-MM` of the range, on the same `basis` as the charts; fixed records only |
+| `q` | a CVE ID (exact once complete, a prefix before that) or part of a package name |
+| `sort`, `order` | `days` (default), `published`, `fixed` or `severity`; `desc` (default) or `asc` |
+| `limit`, `offset` | page size (default 50, at most 200) and start |
+
+With `unit=cve` a row is one CVE for one distribution, with the number of
+distinct packages behind it and the first three names; with `unit=package` a
+row is one package in one release. The bucket bounds returned by
+`/mttr/distribution` and `/backlog` can be passed straight back as
+`min_days`/`max_days`, which is how the dashboard's bars open their lists.
 
 Responses are cached in memory until the next successful ingest run.
 
 ## Design notes
 
 - Series colour follows the distribution, never its position in the filter:
-  Chainguard blue, Ubuntu orange, Debian aqua, Red Hat yellow, Echo magenta.
+  Chainguard blue, Ubuntu orange, Debian aqua, Red Hat yellow, Echo magenta,
+  Docker Hardened Images red.
   The order is the one validated for colour-vision-deficiency safety in both
   themes; severity uses a single-hue ordinal ramp so it never competes with
   distribution identity.
@@ -196,6 +228,10 @@ Responses are cached in memory until the next successful ingest run.
 - Severity for older CVEs is often "unrated" because cve.org records before
   2016 rarely carry CVSS and CISA's enrichment covers 2023 onwards. NVD could
   be added as a further severity source.
+- Docker Hardened Images has no time-to-remediate figures because its feed
+  carries no fix dates. Recording when a fix first appears in the feed (on
+  each ingest, or from the history of its advisories repository) would date
+  fixes from then on.
 - Incremental sync does not detect deletions from an index; the daily full
   reload handles those.
 - The CVE loader always takes the full nightly archive; the hourly delta

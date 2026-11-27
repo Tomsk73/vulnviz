@@ -1,6 +1,7 @@
-import { useMemo } from 'react'
+import { useCallback, useMemo } from 'react'
 import { DistroInfo, useGet } from './api'
 import { useFilters, useSelectedDistros } from './filters'
+import { Browse, useBrowse } from './browse'
 import { dateTime } from './format'
 import { FilterBar } from './sections/FilterBar'
 import { Hero } from './sections/Hero'
@@ -9,6 +10,7 @@ import { MttrSection } from './sections/MttrSection'
 import { DistributionSection } from './sections/DistributionSection'
 import { BacklogSection } from './sections/BacklogSection'
 import { CveFlowSection } from './sections/CveFlowSection'
+import { BrowseSection } from './sections/BrowseSection'
 import { CveLookup } from './sections/CveLookup'
 import { NotesSection } from './sections/NotesSection'
 
@@ -19,6 +21,19 @@ export default function App() {
   const distros = useMemo(() => (distrosRaw ?? []).filter(d => d.advisories > 0), [distrosRaw])
   const ids = useMemo(() => distros.map(d => d.id), [distros])
   const selected = useSelectedDistros(f, ids)
+  const { b, set, replace } = useBrowse()
+  // A chart mark opens the record browser on exactly what the mark counted.
+  const drill = useCallback((to: Partial<Browse>) => {
+    replace(to)
+    requestAnimationFrame(() => {
+      const heading = document.getElementById('browse-h')
+      if (!heading) return
+      const bar = document.querySelector<HTMLElement>('.filters')
+      const top = heading.getBoundingClientRect().top + window.scrollY - (bar?.offsetHeight ?? 0) - 24
+      window.scrollTo({ top, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
+      heading.focus({ preventScroll: true })
+    })
+  }, [replace])
 
   return (
     <main className="page">
@@ -30,11 +45,12 @@ export default function App() {
         <>
           <FilterBar f={f} update={update} distros={distros} />
           <Hero f={f} distros={distros} selected={selected} />
-          <FixesSection f={f} distros={distros} selected={selected} />
+          <FixesSection f={f} distros={distros} selected={selected} onDrill={drill} />
           <MttrSection f={f} distros={distros} selected={selected} />
-          <DistributionSection f={f} distros={distros} selected={selected} />
-          <BacklogSection f={f} distros={distros} selected={selected} />
+          <DistributionSection f={f} distros={distros} selected={selected} onDrill={drill} />
+          <BacklogSection f={f} distros={distros} selected={selected} onDrill={drill} />
           <CveFlowSection f={f} />
+          <BrowseSection f={f} distros={distros} selected={selected} b={b} set={set} reset={() => replace({})} />
           <CveLookup distros={distros} />
           <NotesSection distros={distros} />
         </>

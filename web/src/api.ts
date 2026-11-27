@@ -8,8 +8,19 @@ export interface DistroInfo {
 }
 export interface MonthlyFix { distro: string; month: string; severity: string; fixes: number }
 export interface MTTRPoint { distro: string; month?: string; severity: string; n: number; median: number | null; mean: number | null; p25: number | null; p75: number | null; p90: number | null }
-export interface Bucket { distro: string; bucket: string; order: number; n: number }
-export interface OpenRow { distro: string; severity: string; age: string; order: number; n: number }
+/** min_days (inclusive) and max_days (exclusive) are the bucket's range for the record browser; null is unbounded. */
+export interface Bucket { distro: string; bucket: string; order: number; n: number; min_days: number | null; max_days: number | null }
+export interface OpenRow { distro: string; severity: string; age: string; order: number; n: number; min_days: number | null; max_days: number | null; undated?: boolean }
+/** One row of the record browser: a CVE as one distribution fixed it or still lists it. */
+export interface RecordRow {
+  distro: string; cve_id: string; severity: string; cvss_score: number | null; cve_published: string | null
+  fix_time: string | null; fix_time_trusted: boolean
+  days: number | null            // publication to fix, or to now when open; null when it cannot be measured
+  advisory_id: string
+  ecosystem?: string; package?: string          // package mode
+  packages: number; package_names: string[] | null   // CVE mode: distinct package names, and the first few
+}
+export interface RecordPage { rows: RecordRow[]; total: number; limit: number; offset: number }
 export interface CVEMonth { month: string; severity: string; cves: number }
 export interface Ecosystem { ecosystem: string; fixes: number }
 export interface CVEDetail {

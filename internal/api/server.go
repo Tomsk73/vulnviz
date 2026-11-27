@@ -63,6 +63,17 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/mttr/distribution", s.analytics(func(ctx context.Context, p params) (any, error) { return s.mttrDistribution(ctx, p) }))
 	mux.HandleFunc("GET /api/v1/backlog", s.analytics(func(ctx context.Context, p params) (any, error) { return s.backlog(ctx, p) }))
 	mux.HandleFunc("GET /api/v1/cves/monthly", s.analytics(func(ctx context.Context, p params) (any, error) { return s.cvesMonthly(ctx, p) }))
+	mux.HandleFunc("GET /api/v1/records", s.cachedJSON(func(ctx context.Context, r *http.Request) (any, error) {
+		p, err := parseParams(r)
+		if err != nil {
+			return nil, badRequest(err.Error())
+		}
+		rp, err := parseRecordParams(r)
+		if err != nil {
+			return nil, badRequest(err.Error())
+		}
+		return s.records(ctx, p, rp)
+	}))
 	mux.HandleFunc("GET /api/v1/cve/{id}", s.cachedJSON(func(ctx context.Context, r *http.Request) (any, error) {
 		id := strings.ToUpper(strings.TrimSpace(r.PathValue("id")))
 		d, err := s.cveDetail(ctx, id)

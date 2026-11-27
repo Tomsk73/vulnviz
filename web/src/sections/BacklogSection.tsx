@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { DistroInfo, OpenRow, useGet } from '../api'
 import { Filters, apiParams } from '../filters'
+import { Drill, bucketRange } from '../browse'
 import { severities, severityColor, severityLabel } from '../palette'
 import { int } from '../format'
 import { Section } from './Section'
@@ -10,7 +11,7 @@ import { DataTable } from '../charts/DataTable'
 
 const ageColors = ['var(--sev-low)', 'var(--sev-medium)', 'var(--sev-high)', 'var(--sev-critical)', 'var(--sev-unknown)']
 
-export function BacklogSection({ f, distros, selected }: { f: Filters; distros: DistroInfo[]; selected: string[] }) {
+export function BacklogSection({ f, distros, selected, onDrill }: { f: Filters; distros: DistroInfo[]; selected: string[]; onDrill: Drill }) {
   const p = apiParams(f, selected)
   const params = { distros: p.distros, severity: p.severity, ecosystem: p.ecosystem }
   const { data, loading, error } = useGet<{ rows: OpenRow[] }>('/api/v1/backlog', params)
@@ -19,9 +20,9 @@ export function BacklogSection({ f, distros, selected }: { f: Filters; distros: 
   const absent = selected.filter(id => !present.includes(id)).map(id => distros.find(d => d.id === id)?.name ?? id)
   const names = present.map(id => distros.find(d => d.id === id)?.name ?? id)
   const ages = useMemo(() => {
-    const a: string[] = []
-    for (const r of data?.rows ?? []) a[r.order] = r.age
-    return a.map((n, i) => ({ name: n, order: i })).filter(x => x.name)
+    const seen: OpenRow[] = []
+    for (const r of data?.rows ?? []) seen[r.order] = r
+    return seen.map((r, i) => ({ name: r?.age, order: i, range: r && bucketRange(r) })).filter(x => x.name)
   }, [data])
   const byAge = ages.map(a => ({
     key: String(a.order), label: a.name, color: ageColors[a.order] ?? 'var(--sev-unknown)',
@@ -43,14 +44,16 @@ export function BacklogSection({ f, distros, selected }: { f: Filters; distros: 
       <div className="grid-two">
         <div className={`chart${loading ? ' loading' : ''}`}>
           <p className="chart-title">By age since CVE publication</p>
-          <p className="chart-sub">Older open CVEs sit to the right of each bar.</p>
-          <HBars title="Open CVEs by age" categories={names} groups={byAge} mode="stacked" />
+          <p className="chart-sub">Older open CVEs sit to the right of each bar. Select a segment to list its CVEs.</p>
+          <HBars title="Open CVEs by age" categories={names} groups={byAge} mode="stacked" selectHint="Select a segment to list its CVEs"
+            onSelect={(c, g) => onDrill({ status: 'open', distro: present[c], ...(g != null ? ages[g].range : {}) })} />
           <Legend items={byAge.map(g => ({ label: g.label, color: g.color }))} />
         </div>
         <div className={`chart${loading ? ' loading' : ''}`}>
           <p className="chart-title">By severity</p>
-          <p className="chart-sub">{f.severity === 'all' ? 'Every severity, darkest is critical.' : `Only ${severityLabel[f.severity].toLowerCase()} CVEs, per the filter.`}</p>
-          <HBars title="Open CVEs by severity" categories={names} groups={bySev} mode="stacked" />
+          <p className="chart-sub">{f.severity === 'all' ? 'Every severity, darkest is critical.' : `Only ${severityLabel[f.severity].toLowerCase()} CVEs, per the filter.`} Select a segment to list its CVEs.</p>
+          <HBars title="Open CVEs by severity" categories={names} groups={bySev} mode="stacked" selectHint="Select a segment to list its CVEs"
+            onSelect={(c, g) => onDrill({ status: 'open', distro: present[c], ...(g != null ? { severity: bySev[g].key } : {}) })} />
           <Legend items={bySev.map(g => ({ label: g.label, color: g.color }))} />
         </div>
       </div>

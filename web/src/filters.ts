@@ -44,7 +44,9 @@ export function useFilters(): [Filters, (patch: Partial<Filters>) => void] {
   const update = useCallback((patch: Partial<Filters>) => {
     setF(prev => {
       const next = { ...prev, ...patch }
-      const q = new URLSearchParams()
+      // Keep parameters this hook does not own (the record browser's state).
+      const q = new URLSearchParams(location.search)
+      for (const k of ['from', 'to', 'distros', 'severity', 'unit', 'basis', 'ecosystem', 'scope']) q.delete(k)
       q.set('from', next.from); q.set('to', next.to)
       if (next.distros.length) q.set('distros', next.distros.join(','))
       if (next.severity !== 'all') q.set('severity', next.severity)

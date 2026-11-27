@@ -9,9 +9,11 @@ export interface Series { key: string; label: string; color: string }
 /**
  * Stacked columns over months. Marks are capped at 24px, segments separated by
  * a 2px surface gap, hover lifts the column and shows every series at that X.
+ * With onSelect, a column that has data acts as a button for its month.
  */
-export function StackedColumns({ months, series, values, height = 220, maxY, title }: {
+export function StackedColumns({ months, series, values, height = 220, maxY, title, onSelect, selectHint }: {
   months: string[]; series: Series[]; values: Record<string, Record<string, number>>; height?: number; maxY?: number; title: string
+  onSelect?: (month: string) => void; selectHint?: string
 }) {
   const [ref, width] = useSize<HTMLDivElement>()
   const [hover, setHover] = useState<number | null>(null)
@@ -31,7 +33,7 @@ export function StackedColumns({ months, series, values, height = 220, maxY, tit
   return (
     <div ref={ref} style={{ position: 'relative' }}>
       {width > 0 && (
-        <svg height={height} viewBox={`0 0 ${width} ${height}`} role="img" aria-label={title} onMouseLeave={() => setHover(null)}>
+        <svg height={height} viewBox={`0 0 ${width} ${height}`} role={onSelect ? 'group' : 'img'} aria-label={title} onMouseLeave={() => setHover(null)}>
           <g transform={`translate(${m.left},${m.top})`}>
             <g className="grid">{ticks.map(t => <line key={t} x1={0} x2={innerW} y1={y(t)} y2={y(t)} />)}</g>
             <g className="tick-y">{ticks.map(t => <text key={t} x={-8} y={y(t)} dy="0.35em" textAnchor="end">{compact(t)}</text>)}</g>
@@ -45,8 +47,13 @@ export function StackedColumns({ months, series, values, height = 220, maxY, tit
                 acc += v
                 return { se, v, y0, y1 }
               }).filter(s => s.v > 0)
+              const select = onSelect && totals[i] > 0 ? {
+                role: 'button', className: 'mark selectable',
+                onClick: () => onSelect(mo),
+                onKeyDown: (e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(mo) } },
+              } : { className: 'mark' }
               return (
-                <g key={mo} className="mark" tabIndex={0} onMouseEnter={() => setHover(i)} onFocus={() => setHover(i)} onBlur={() => setHover(null)} aria-label={`${monthLabel(mo)}: ${int(totals[i])}`}>
+                <g key={mo} {...select} tabIndex={0} onMouseEnter={() => setHover(i)} onFocus={() => setHover(i)} onBlur={() => setHover(null)} aria-label={`${monthLabel(mo)}: ${int(totals[i])}`}>
                   <rect x={cx - band / 2} y={0} width={band} height={innerH} fill="transparent" />
                   {segs.map((s, j) => {
                     const isTop = j === segs.length - 1
@@ -69,7 +76,7 @@ export function StackedColumns({ months, series, values, height = 220, maxY, tit
       {hover !== null && months[hover] && (
         <Tooltip x={m.left + hover * band + band / 2} y={m.top} width={width} title={monthLabel(months[hover])}
           rows={[...series].reverse().map(se => ({ label: se.label, value: int(values[months[hover]]?.[se.key] ?? 0), color: se.color, square: true }))}
-          foot={<><span>Total</span><b>{int(totals[hover])}</b></>} />
+          foot={<><span>Total</span><b>{int(totals[hover])}</b></>} hint={onSelect && totals[hover] > 0 ? selectHint : undefined} />
       )}
     </div>
   )

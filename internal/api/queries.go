@@ -19,9 +19,22 @@ func (b *argBuilder) add(v any) string {
 	return fmt.Sprintf("$%d", len(b.args))
 }
 
+const factCols = "distro, cve_id, fix_time, fix_time_trusted, cve_published, severity, ttr_days"
+
 // factSource returns a subquery exposing one row per fix for the requested
 // unit and ecosystem filter, with the columns the analytics queries need.
-func factSource(p params, b *argBuilder) string {
+func factSource(p params, b *argBuilder) string { return factSourceWith(p, b, "", "") }
+
+// factSourceWith is factSource with extra selected columns (a comma-separated
+// list) and an optional ILIKE pattern on the package name. A package pattern
+// works like an ecosystem filter: it narrows the package-level facts before
+// they are reduced to one row per CVE, so the fix shown is the earliest one
+// among the matching packages.
+func factSourceWith(p params, b *argBuilder, extraCols, pkgLike string) string {
+	cols := factCols
+	if extraCols != "" {
+		cols += ", " + extraCols
+	}
 	where := []string{"1=1"}
 	if len(p.Distros) > 0 {
 		where = append(where, "distro = ANY("+b.add(pq.Array(p.Distros))+")")
@@ -29,20 +42,25 @@ func factSource(p params, b *argBuilder) string {
 	if p.Recent {
 		where = append(where, "cve_published >= "+b.add(p.From), "cve_published < "+b.add(p.To))
 	}
-	if p.Ecosystem == "" {
+	if p.Ecosystem == "" && pkgLike == "" {
 		table := "fact_fixes_cve"
 		if p.Unit == "package" {
 			table = "fact_fixes_pkg"
 		}
-		return fmt.Sprintf("(SELECT distro, cve_id, fix_time, fix_time_trusted, cve_published, severity, ttr_days FROM %s WHERE %s)", table, strings.Join(where, " AND "))
+		return fmt.Sprintf("(SELECT %s FROM %s WHERE %s)", cols, table, strings.Join(where, " AND "))
 	}
-	clause, arg := ecosystemClause("ecosystem", p.Ecosystem)
-	where = append(where, fmt.Sprintf(clause, b.add(arg)))
+	if p.Ecosystem != "" {
+		clause, arg := ecosystemClause("ecosystem", p.Ecosystem)
+		where = append(where, fmt.Sprintf(clause, b.add(arg)))
+	}
+	if pkgLike != "" {
+		where = append(where, "package ILIKE "+b.add(pkgLike))
+	}
 	if p.Unit == "package" {
-		return fmt.Sprintf("(SELECT distro, cve_id, fix_time, fix_time_trusted, cve_published, severity, ttr_days FROM fact_fixes_pkg WHERE %s)", strings.Join(where, " AND "))
+		return fmt.Sprintf("(SELECT %s FROM fact_fixes_pkg WHERE %s)", cols, strings.Join(where, " AND "))
 	}
-	return fmt.Sprintf(`(SELECT DISTINCT ON (distro, cve_id) distro, cve_id, fix_time, fix_time_trusted, cve_published, severity, ttr_days
-	                    FROM fact_fixes_pkg WHERE %s ORDER BY distro, cve_id, fix_time_trusted DESC, fix_time)`, strings.Join(where, " AND "))
+	return fmt.Sprintf(`(SELECT DISTINCT ON (distro, cve_id) %s
+	                    FROM fact_fixes_pkg WHERE %s ORDER BY distro, cve_id, fix_time_trusted DESC, fix_time)`, cols, strings.Join(where, " AND "))
 }
 
 func timeCol(p params) string {
@@ -199,18 +217,42 @@ func nf(v sql.NullFloat64) *float64 {
 	return &f
 }
 
-// Bucket is one histogram bar.
+// Bucket is one histogram bar. MinDays (inclusive) and MaxDays (exclusive) are
+// the bar's range in the terms the record browser filters on; nil is unbounded.
 type Bucket struct {
-	Distro string `json:"distro"`
-	Bucket string `json:"bucket"`
-	Order  int    `json:"order"`
-	N      int64  `json:"n"`
+	Distro  string   `json:"distro"`
+	Bucket  string   `json:"bucket"`
+	Order   int      `json:"order"`
+	N       int64    `json:"n"`
+	MinDays *float64 `json:"min_days"`
+	MaxDays *float64 `json:"max_days"`
 }
 
 const ttrBucketExpr = `CASE WHEN ttr_days < 0 THEN 0 WHEN ttr_days < 1 THEN 1 WHEN ttr_days < 7 THEN 2 WHEN ttr_days < 30 THEN 3
                             WHEN ttr_days < 90 THEN 4 WHEN ttr_days < 365 THEN 5 ELSE 6 END`
 
 var ttrBucketNames = []string{"before publication", "under 1 day", "1 to 7 days", "7 to 30 days", "30 to 90 days", "90 days to 1 year", "over 1 year"}
+
+// The boundaries between the buckets above and between the backlog age
+// buckets below, in days. They mirror the CASE expressions; keep them in step.
+var (
+	ttrEdges = []float64{0, 1, 7, 30, 90, 365}
+	ageEdges = []float64{30, 90, 365}
+)
+
+// edgeBounds returns the [min, max) day range of bucket i, given the edges
+// that separate consecutive buckets.
+func edgeBounds(edges []float64, i int) (min, max *float64) {
+	if i > 0 && i <= len(edges) {
+		v := edges[i-1]
+		min = &v
+	}
+	if i >= 0 && i < len(edges) {
+		v := edges[i]
+		max = &v
+	}
+	return min, max
+}
 
 func (s *Server) mttrDistribution(ctx context.Context, p params) ([]Bucket, error) {
 	b := &argBuilder{}
@@ -233,21 +275,28 @@ func (s *Server) mttrDistribution(ctx context.Context, p params) ([]Bucket, erro
 			return nil, err
 		}
 		r.Bucket = ttrBucketNames[r.Order]
+		r.MinDays, r.MaxDays = edgeBounds(ttrEdges, r.Order)
 		out = append(out, r)
 	}
 	return out, rows.Err()
 }
 
-// OpenRow is one backlog cell.
+// OpenRow is one backlog cell. MinDays/MaxDays give the age bucket's range as
+// in Bucket; Undated marks the bucket of CVEs with no publication date.
 type OpenRow struct {
-	Distro   string `json:"distro"`
-	Severity string `json:"severity"`
-	Age      string `json:"age"`
-	Order    int    `json:"order"`
-	N        int64  `json:"n"`
+	Distro   string   `json:"distro"`
+	Severity string   `json:"severity"`
+	Age      string   `json:"age"`
+	Order    int      `json:"order"`
+	N        int64    `json:"n"`
+	MinDays  *float64 `json:"min_days"`
+	MaxDays  *float64 `json:"max_days"`
+	Undated  bool     `json:"undated,omitempty"`
 }
 
 var ageNames = []string{"under 30 days", "30 to 90 days", "90 days to 1 year", "over 1 year", "no CVE date"}
+
+const ageUndated = 4 // index of "no CVE date" in ageNames
 
 func (s *Server) backlog(ctx context.Context, p params) ([]OpenRow, error) {
 	b := &argBuilder{}
@@ -281,6 +330,11 @@ func (s *Server) backlog(ctx context.Context, p params) ([]OpenRow, error) {
 			return nil, err
 		}
 		r.Age = ageNames[r.Order]
+		if r.Order == ageUndated {
+			r.Undated = true
+		} else {
+			r.MinDays, r.MaxDays = edgeBounds(ageEdges, r.Order)
+		}
 		out = append(out, r)
 	}
 	return out, rows.Err()

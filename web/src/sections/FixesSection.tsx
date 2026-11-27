@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { DistroInfo, MonthlyFix, useGet } from '../api'
 import { Filters, apiParams } from '../filters'
+import { Drill } from '../browse'
 import { severities, severityColor, severityLabel } from '../palette'
 import { int, monthLabel, monthsBetween } from '../format'
 import { Section } from './Section'
@@ -8,7 +9,7 @@ import { StackedColumns } from '../charts/StackedColumns'
 import { Legend } from '../charts/Legend'
 import { DataTable } from '../charts/DataTable'
 
-export function FixesSection({ f, distros, selected }: { f: Filters; distros: DistroInfo[]; selected: string[] }) {
+export function FixesSection({ f, distros, selected, onDrill }: { f: Filters; distros: DistroInfo[]; selected: string[]; onDrill: Drill }) {
   const params = apiParams(f, selected)
   const { data, loading, error } = useGet<{ rows: MonthlyFix[] }>('/api/v1/fixes/monthly', params)
   const [sameScale, setSameScale] = useState(false)
@@ -33,7 +34,7 @@ export function FixesSection({ f, distros, selected }: { f: Filters; distros: Di
   return (
     <Section id="fixes" title={`${f.unit === 'cve' ? 'CVEs fixed' : 'Package fixes shipped'} per month, by severity`}
       lede={f.basis === 'fix_month'
-        ? `How many  each distribution shipped in each month, split by the CVE's own CVSS rating (the distribution's rating when cve.org has none). Only advisories with a real fix date are placed here; switch to "By CVE month" to include tracker-only fixes.`
+        ? `How many ${f.unit === 'cve' ? 'CVEs each distribution fixed' : 'package fixes each distribution shipped'} in each month, split by the CVE's own CVSS rating (the distribution's rating when cve.org has none). Only fixes with a real fix date are placed here; switch to "By CVE month" to include the rest.`
         : `${unitWord[0].toUpperCase() + unitWord.slice(1)}, placed in the month the CVE was published rather than the month the fix shipped.`}
       tools={<button type="button" className="btn" aria-pressed={sameScale} onClick={() => setSameScale(s => !s)}>Same scale</button>}
       table={<DataTable caption="Fixes per month by severity" rows={tableRows} columns={[{ key: 'distro', label: 'Distribution' }, { key: 'month', label: 'Month' }, { key: 'severity', label: 'Severity' }, { key: 'fixes', label: 'Fixes', num: true, format: v => int(v as number) }]} />}>
@@ -46,10 +47,11 @@ export function FixesSection({ f, distros, selected }: { f: Filters; distros: Di
           return (
             <div key={id} className={`chart${loading ? ' loading' : ''}`}>
               <p className="chart-title">{d?.name ?? id}</p>
-              <p className="chart-sub">{int(total)} {unitWord} in range</p>
+              <p className="chart-sub">{int(total)} {unitWord} in range{total > 0 && '. Select a month to list them.'}</p>
               {total === 0 && !loading
-                ? <p className="empty-note">{f.basis === 'fix_month' ? 'No advisories with a dated fix in this range. Switch to "By CVE month" to count tracker-only fixes.' : 'No fixes in this range.'}</p>
-                : <StackedColumns title={`${d?.name ?? id} fixes per month`} months={months} series={series} values={perDistro[id] ?? {}} maxY={sameScale ? globalMax : undefined} />}
+                ? <p className="empty-note">{f.basis === 'fix_month' ? 'No fixes with a real fix date in this range. Switch to "By CVE month" to count the fixes this feed does not date.' : 'No fixes in this range.'}</p>
+                : <StackedColumns title={`${d?.name ?? id} fixes per month`} months={months} series={series} values={perDistro[id] ?? {}} maxY={sameScale ? globalMax : undefined}
+                    selectHint="Select to list this month" onSelect={month => onDrill({ status: 'fixed', distro: id, month })} />}
             </div>
           )
         })}

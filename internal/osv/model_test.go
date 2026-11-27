@@ -10,6 +10,7 @@ func TestKind(t *testing.T) {
 	for id, want := range map[string]string{
 		"RHSA-2024:1234": "RHSA", "DEBIAN-CVE-2024-1": "DEBIAN-CVE", "USN-6913-1": "USN",
 		"CGA-2222-46jc-4hmg": "CGA", "CGA-cfgh-abcd-xyzw": "CGA", "LSN-0065-1": "LSN", "ALPINE-CVE-2006-20001": "ALPINE-CVE", "CVE-2004-2462": "CVE", "ECHO-35af-8dfc-9fee": "ECHO",
+		"DHI-24kg-yfjo-uv2q-k5te": "DHI",
 	} {
 		if got := Kind(id); got != want {
 			t.Errorf("%s: %s != %s", id, got, want)
@@ -32,6 +33,39 @@ const cga = `{"id":"CGA-1","published":"2026-04-03T13:57:32Z","modified":"2026-0
 const ucve = `{"id":"UBUNTU-CVE-2001-1593","published":"2014-04-05T21:55:00Z","modified":"2025-07-16T07:30:37Z","upstream":["CVE-2001-1593"],
 "affected":[{"package":{"name":"a2ps","ecosystem":"Ubuntu:14.04:LTS"},"ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"},{"fixed":"1:4.14-1.2"}]}]}],
 "severity":[{"type":"Ubuntu","score":"low"}]}`
+
+// One fixed release, one affected release with an open-ended range, and one
+// release that only enumerates affected versions (no ranges).
+const dhi = `{"id":"DHI-24kg-yfjo-uv2q-k5te","published":"2026-11-18T11:59:23Z","modified":"2026-11-24T19:15:03.270887233Z","upstream":["CVE-2026-27456"],
+"severity":[{"type":"CVSS_V3","score":"CVSS:3.1/AV:L/AC:H/PR:L/UI:N/S:U/C:H/I:N/A:N"}],
+"affected":[{"package":{"name":"util-linux","ecosystem":"Docker Hardened Images:Alpine:3.23","purl":"pkg:apk/dhi/util-linux"},"ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"},{"fixed":"2.41.4-r0"}]}],"versions":["2.41.2-r0"]},
+{"package":{"name":"util-linux","ecosystem":"Docker Hardened Images:Debian:13","purl":"pkg:deb/dhi/util-linux"},"ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"}]}],"versions":["2.41-5+dhi0"]},
+{"package":{"name":"util-linux","ecosystem":"Docker Hardened Images:Alpine:3.24","purl":"pkg:apk/dhi/util-linux"},"versions":["2.41.2-r0"]}]}`
+
+func TestParseDHI(t *testing.T) {
+	d := config.Distro{ID: "dhi", Rules: config.Rules{FixTimeBasis: "published", TrustedKinds: []string{"__none__"}}}
+	a, err := Parse([]byte(dhi), d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.Kind != "DHI" || len(a.CVEs) != 1 || a.CVEs[0] != "CVE-2026-27456" || a.Severity != "medium" {
+		t.Fatalf("dhi identity failed: %+v", a)
+	}
+	// The feed's published time is when the record entered it, never a fix date.
+	if !a.HasFix || a.FixTimeTrusted {
+		t.Fatalf("dhi fix must be counted but untimed: has_fix=%v trusted=%v", a.HasFix, a.FixTimeTrusted)
+	}
+	if len(a.Packages) != 3 {
+		t.Fatalf("expected one row per release, got %+v", a.Packages)
+	}
+	fixed := map[string]string{}
+	for _, p := range a.Packages {
+		fixed[p.Ecosystem] = p.Fixed
+	}
+	if fixed["Docker Hardened Images:Alpine:3.23"] != "2.41.4-r0" || fixed["Docker Hardened Images:Debian:13"] != "" || fixed["Docker Hardened Images:Alpine:3.24"] != "" {
+		t.Fatalf("dhi fixed/open split failed: %v", fixed)
+	}
+}
 
 func TestParseRules(t *testing.T) {
 	gap := 0
